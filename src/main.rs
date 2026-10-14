@@ -118,7 +118,7 @@ fn select(
     step: usize,
     prop: Vec<String>,
     no_assumes: bool,
-) {
+) -> Result<(), String> {
     let ywmap = YWMap::parse(BufReader::new(
         std::fs::File::open(&yw).expect("Could not open YW file"),
     ));
@@ -136,7 +136,10 @@ fn select(
             .expect("Expected \\top.*$n")
             .0;
         let (stepn, name) = name.split_once('_').expect("badly formed property");
-        assert!(stepn.starts_with("Step"));
+        if !stepn.starts_with("Step") {
+            return Err(format!("Property name {stepn} doesn't start with 'Step'"));
+        }
+
         let pstep: usize = stepn[4..].parse().expect("badly formed property name");
         let is_cover = name.ends_with("_Cover");
         bn += 1;
@@ -164,6 +167,7 @@ fn select(
     }
 
     aig.to_file(&out, false);
+    Ok(())
 }
 
 /// Simulate a trace and produce a VCD file
@@ -432,7 +436,7 @@ pub fn check_aig(aig: &aig::Aig) {
     }
 }
 
-fn main() {
+fn main() -> Result<(), String> {
     let args = Args::parse();
     let aig = aig::Aig::from_file(&args.aig);
     check_aig(&aig); // Never actually failed! Yosys maintains this invariant
@@ -450,14 +454,23 @@ fn main() {
             vmap,
             trace,
             vcd: out,
-        } => simulate(aig, yw, vmap, trace, out),
-        Subcommand::Coi { vmap, name, ywmap } => coi(aig, vmap, name, ywmap),
+        } => {
+            simulate(aig, yw, vmap, trace, out);
+            Ok(())
+        },
+        Subcommand::Coi { vmap, name, ywmap } => {
+            coi(aig, vmap, name, ywmap);
+            Ok(())
+        }
         Subcommand::Why {
             vmap,
             trace,
             step,
             signal,
             bit,
-        } => why(aig, vmap, trace, step, signal, bit),
+        } => {
+            why(aig, vmap, trace, step, signal, bit);
+            Ok(())
+        }
     }
 }
