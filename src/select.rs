@@ -96,14 +96,25 @@ pub fn select(
     prop: Vec<String>,
     no_assumes: bool,
 ) -> Result<(), String> {
-    let ywmap = YWMap::parse(BufReader::new(
-        std::fs::File::open(&yw).expect("Could not open YW file"),
-    ));
+    let yw_file =
+        std::fs::File::open(&yw).map_err(|e| format!("Could not open YW file {yw}: {e}"))?;
+    let ywmap = YWMap::parse(BufReader::new(yw_file));
 
-    assert_eq!(aig.justice.len(), 0);
-    assert_eq!(aig.fairness.len(), 0);
-
-    assert_eq!(aig.bads.len(), ywmap.asserts.len());
+    let n_justice = aig.justice.len();
+    if n_justice != 0 {
+        return Err(format!("AIG has {n_justice} justice properties, expected none"));
+    }
+    let n_fairness = aig.fairness.len();
+    if n_fairness != 0 {
+        return Err(format!("AIG has {n_fairness} fairness constraints, expected none"));
+    }
+    let n_bads = aig.bads.len();
+    let n_asserts = ywmap.asserts.len();
+    if n_bads != n_asserts {
+        return Err(format!(
+            "AIG has {n_bads} bad-state properties but the YW map has {n_asserts} asserts"
+        ));
+    }
 
     // Walk the props alongside their names, collecting the ones that survive.
     let old_props = std::mem::take(&mut aig.bads);
