@@ -42,6 +42,52 @@ fn parse_prop_name(raw: &str) -> Result<PropName<'_>, String> {
     })
 }
 
+/// What to do with a single assert from the AIG.
+#[derive(Debug, PartialEq, Eq)]
+enum Action {
+    /// Keep the property as something to be proven
+    Keep,
+    /// Keep a cover property, negating it so BMC looks for a trace that hits it
+    KeepNegated,
+    /// Remove the property entirely
+    Delete,
+    /// Turn the assert into an assumption (a constraint)
+    ToAssume,
+}
+
+/// Decide what to do with a property (keep, negate, delete or assume)
+fn classify(prop: &PropName, step: usize, wanted: &[String], no_assumes: bool) -> Action {
+    if prop.step > step {
+        // The property is for a later step. Discard it.
+        Action::Delete
+    } else if prop.step == step {
+        // The property is for this step. If there is a nonempty list of wanted properties, that
+        // might filter out this one. If not, we want to keep it.
+        //
+        // Keep the property in negated form if it's a cover property. That will mean that the tool
+        // is "trying to prove the negation of the property". That would mean finding an example of
+        // the double negation, which is what we want.
+        if wanted.is_empty() || wanted.iter().any(|x| x == prop.name) {
+            if prop.is_cover {
+                Action::KeepNegated
+            } else {
+                Action::Keep
+            }
+        } else {
+            Action::Delete
+        }
+    } else {
+        // The property is for an earlier step. If it was a cover property, that won't be useful for
+        // this step (we don't carry existentials as assumptions!). If not, it can be kept as an
+        // assumption (which can be disabled by passing no_assumes = true).
+        if no_assumes || prop.is_cover {
+            Action::Delete
+        } else {
+            Action::ToAssume
+        }
+    }
+}
+
 pub fn select(
     mut aig: aig::Aig,
     out: String,
@@ -62,32 +108,31 @@ pub fn select(
     let mut bn = 0; // Index in list of names
     let mut b = 0; // Index in what remains of the list of bads in the AIG
     while b < aig.bads.len() {
-        let PropName {
-            step: pstep,
-            name,
-            is_cover,
-        } = parse_prop_name(&ywmap.asserts[bn][0])?;
+        let parsed = parse_prop_name(&ywmap.asserts[bn][0])?;
+        let name = parsed.name;
         bn += 1;
 
-        if pstep == step && (prop.is_empty() || prop.iter().any(|x| x == name)) {
-            if is_cover {
+        match classify(&parsed, step, &prop, no_assumes) {
+            Action::Keep => {
+                println!("Keeping {name}");
+                b += 1;
+            }
+            Action::KeepNegated => {
                 // We encode covers as asserts since otherwise they are lost before going into the AIG file,
                 // this means we need to negate them if we want to do BMC for them.
                 println!("Keeping {name} (cover statement, negating)");
                 aig.bads[b] = !aig.bads[b];
-            } else {
-                println!("Keeping {name}");
+                b += 1;
             }
-            b += 1;
-        } else if no_assumes || is_cover || pstep >= step {
-            println!("Deleting {}", name);
-            aig.bads.remove(b);
-        } else if pstep < step {
-            println!("Assert2Assume {}", name);
-            aig.constraints.push(!aig.bads[b]);
-            aig.bads.remove(b);
-        } else {
-            unreachable!()
+            Action::Delete => {
+                println!("Deleting {name}");
+                aig.bads.remove(b);
+            }
+            Action::ToAssume => {
+                println!("Assert2Assume {name}");
+                aig.constraints.push(!aig.bads[b]);
+                aig.bads.remove(b);
+            }
         }
     }
 
