@@ -43,6 +43,11 @@ mod ywmap;
 
 #[derive(clap::Parser, Debug)]
 struct Args {
+    #[arg(help = "Hierarchical path where properties live.",
+          long,
+          default_value = "top")]
+    hier_pfx: String,
+
     #[arg(help = "Path to .aig file to read.")]
     aig: String,
 
@@ -391,7 +396,7 @@ fn main() -> Result<(), String> {
             step,
             prop,
             no_assumes,
-        } => select(aig, out, yw, step, prop, no_assumes),
+        } => select(aig, &args.hier_pfx, out, yw, step, prop, no_assumes),
         Subcommand::Simulate {
             yw,
             vmap,

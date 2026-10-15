@@ -18,20 +18,27 @@ struct PropName<'a> {
 
 /// Parse a raw assert name from a .ywmap file.
 ///
-/// Names have the form "$\top.Step<n>_<name>$<id>".
-fn parse_prop_name(raw: &str) -> Result<PropName<'_>, String> {
+/// The names in the ywmap file are expected to come from SystemVerilog hierarchical names that
+/// start with hier_pfx. For example, hier_pfx might be "A.B", which would allow a SystemVerilog
+/// hierarchical name of A.B.xyz. This would be reported by Yosys with the name "$\A.B.xyz".
+///
+/// Rather than "xyz", the name should actually be of the form "Step123_Foo" (parsed as step=123;
+/// name="Foo"; is_cover=false) or "Step456_Bar_Cover" (parsed as step=456; name="Bar";
+/// is_cover=true).
+fn parse_prop_name<'a>(hier_pfx: &str, raw: &'a str) -> Result<PropName<'a>, String> {
+    let full_pfx = format!("$\\{hier_pfx}.");
     let rest = raw
-        .strip_prefix("$\\top.")
-        .ok_or_else(|| format!("Property name {raw} doesn't start with '$\\top.'"))?;
+        .strip_prefix(&full_pfx)
+        .ok_or_else(|| format!("Property name '{raw}' doesn't start with '{full_pfx}'."))?;
     let (rest, _) = rest
         .split_once('$')
-        .ok_or_else(|| format!("Property name {raw} has no '$' after '$\\top.'"))?;
+        .ok_or_else(|| format!("Property name '{raw}' has no '$' after '{full_pfx}'."))?;
     let (stepn, name) = rest
         .split_once('_')
-        .ok_or_else(|| format!("Property name {raw} has no '_' after the step"))?;
+        .ok_or_else(|| format!("Property name '{raw}' has no '_' after the step"))?;
     let step = stepn
         .strip_prefix("Step")
-        .ok_or_else(|| format!("Property name {stepn} doesn't start with 'Step'"))?
+        .ok_or_else(|| format!("Step name '{stepn}' doesn't start with 'Step'"))?
         .parse()
         .map_err(|_| format!("Property name {raw} has a badly formed step number"))?;
 
@@ -90,6 +97,7 @@ fn classify(prop: &PropName, step: usize, wanted: &[String], no_assumes: bool) -
 
 pub fn select(
     mut aig: aig::Aig,
+    hier_pfx: &str,
     out: String,
     yw: String,
     step: usize,
@@ -120,7 +128,7 @@ pub fn select(
     let old_props = std::mem::take(&mut aig.bads);
     let mut new_props = Vec::with_capacity(old_props.len());
     for (property, names) in old_props.into_iter().zip(&ywmap.asserts) {
-        let parsed = parse_prop_name(&names[0])?;
+        let parsed = parse_prop_name(hier_pfx, &names[0])?;
         let name = parsed.name;
 
         match classify(&parsed, step, &prop, no_assumes) {
