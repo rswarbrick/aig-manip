@@ -105,36 +105,34 @@ pub fn select(
 
     assert_eq!(aig.bads.len(), ywmap.asserts.len());
 
-    let mut bn = 0; // Index in list of names
-    let mut b = 0; // Index in what remains of the list of bads in the AIG
-    while b < aig.bads.len() {
-        let parsed = parse_prop_name(&ywmap.asserts[bn][0])?;
+    // Walk the props alongside their names, collecting the ones that survive.
+    let old_props = std::mem::take(&mut aig.bads);
+    let mut new_props = Vec::with_capacity(old_props.len());
+    for (property, names) in old_props.into_iter().zip(&ywmap.asserts) {
+        let parsed = parse_prop_name(&names[0])?;
         let name = parsed.name;
-        bn += 1;
 
         match classify(&parsed, step, &prop, no_assumes) {
             Action::Keep => {
                 println!("Keeping {name}");
-                b += 1;
+                new_props.push(property);
             }
             Action::KeepNegated => {
                 // We encode covers as asserts since otherwise they are lost before going into the AIG file,
                 // this means we need to negate them if we want to do BMC for them.
                 println!("Keeping {name} (cover statement, negating)");
-                aig.bads[b] = !aig.bads[b];
-                b += 1;
+                new_props.push(!property);
             }
             Action::Delete => {
                 println!("Deleting {name}");
-                aig.bads.remove(b);
             }
             Action::ToAssume => {
                 println!("Assert2Assume {name}");
-                aig.constraints.push(!aig.bads[b]);
-                aig.bads.remove(b);
+                aig.constraints.push(!property);
             }
         }
     }
+    aig.bads = new_props;
 
     aig.to_file(&out, false);
     Ok(())
